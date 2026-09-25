@@ -1,0 +1,13 @@
+# Secrets and machine-local state: never commit
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.token
+cloudflared/*.json
+*.log
+*.bak*
+
+# Collected from the running host by scripts/stack.sh prepare
+secrets/

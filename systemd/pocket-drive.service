@@ -1,0 +1,42 @@
+[Unit]
+Description=Pocket Drive (self-hosted cloud drive)
+Documentation=https://github.com/bingisainath/pocket-drive
+After=network-online.target
+Wants=network-online.target
+# nginx proxies to this; not a hard dependency so the app can be tested on its own.
+Before=nginx.service
+# Never give up restarting: a crash loop must not leave the drive permanently down.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=sainath-bingi
+Group=sainath-bingi
+WorkingDirectory=/home/sainath-bingi/github.com/pocket-drive/backend
+# Node 20 from nvm: the app pins >=20.12 and better-sqlite3/sharp are built against it.
+ExecStart=/home/sainath-bingi/.nvm/versions/node/v20.19.6/bin/node src/server.js
+Restart=always
+RestartSec=5
+
+# Uploads and ffmpeg transcodes must not be killed mid-flight by a short stop timeout.
+TimeoutStopSec=60
+KillSignal=SIGTERM
+
+# ffmpeg/sharp are CPU-hungry; keep them from starving the rest of the box.
+Nice=5
+CPUWeight=50
+
+# Hardening. The app needs its own data dirs writable and nothing else.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+LockPersonality=true
+ReadWritePaths=/srv/pocket/files /home/sainath-bingi/cloud-storage
+# ProtectHome would hide both the app and its data dir, so it stays off deliberately.
+
+[Install]
+WantedBy=multi-user.target

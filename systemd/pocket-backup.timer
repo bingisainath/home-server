@@ -1,0 +1,14 @@
+[Unit]
+Description=Run the Pocket Drive backup nightly
+Documentation=file:///home/sainath-bingi/github.com/home-server/docs/phase8-backup-hardening.md
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+# Spread the start so it never collides with every other 03:30 cron job on the machine.
+RandomizedDelaySec=15m
+# If the machine was off or asleep at 03:30, run as soon as it is back rather than skipping a night.
+# This is the main reason for a timer over a crontab entry: cron simply loses missed runs.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

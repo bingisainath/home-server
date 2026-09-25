@@ -1,0 +1,82 @@
+# nginx routing for the home server. ONE source of truth for both ways of running it:
+#   host  : scripts/install-nginx.sh renders it with DRIVE_UPSTREAM=127.0.0.1:3000
+#   docker: the nginx image's entrypoint renders it with DRIVE_UPSTREAM=pocket-drive:3000
+# Only ${DRIVE_*} placeholders are substituted (NGINX_ENVSUBST_FILTER), so nginx's own $host,
+# $scheme, $remote_addr and friends survive untouched.
+
+# Only trust X-Forwarded-Proto / CF-Connecting-IP when the request came from our own tunnel.
+# Anyone reaching nginx directly over LAN/Tailscale cannot spoof either header.
+#
+# ${DRIVE_TRUSTED_PROXY} is a CIDR and MUST match how the tunnel reaches nginx:
+#   host mode      127.0.0.1/32      cloudflared runs beside nginx on loopback
+#   container mode the compose subnet cloudflared is a separate container, so loopback never matches
+# Getting this wrong is silent: cookies quietly lose Secure and every client looks like one IP to the
+# login rate limiter. `geo` is used rather than `map` because only it understands CIDR ranges.
+geo $realip_remote_addr $from_tunnel {
+    default                      0;
+    ${DRIVE_TRUSTED_PROXY}       1;
+}
+# Test $realip_remote_addr (the real TCP peer): once real_ip applies, $remote_addr is the *client*
+# address taken from CF-Connecting-IP, so comparing that would never match.
+map $from_tunnel $trusted_fwd_proto {
+    1        $http_x_forwarded_proto;
+    default  "";
+}
+map $trusted_fwd_proto $fwd_proto {
+    ""       $scheme;
+    default  $trusted_fwd_proto;
+}
+set_real_ip_from ${DRIVE_TRUSTED_PROXY};
+real_ip_header   CF-Connecting-IP;
+
+# Anything that is not one of our hostnames (bots hitting the IP, wrong Host header) gets nothing.
+server {
+    listen 80 default_server;
+    server_name _;
+    server_tokens off;
+    return 444;
+}
+
+# --- Pocket Drive: reverse proxy to the Node process ---
+# *.test names exist only for Phase 3 testing (via /etc/hosts or curl --resolve); removed after Phase 4.
+server {
+    listen 80;
+    server_name drive.bingisainath.com drive.test;
+    server_tokens off;
+
+    # Upload chunks are 16 MB by default (UPLOAD_CHUNK_MB) and Cloudflare caps requests at 100 MB.
+    client_max_body_size 100m;
+
+    location / {
+        proxy_pass http://${DRIVE_UPSTREAM};
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $remote_addr;   # single, non-spoofable value; app uses req.ip for rate limiting
+        proxy_set_header X-Forwarded-Proto $fwd_proto;     # app sets Secure cookies from req.secure
+        proxy_request_buffering off;   # stream upload chunks straight through
+        proxy_buffering         off;   # stream downloads / HLS video without spooling to disk
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
+    }
+}
+
+# --- Portfolio: static React build with SPA fallback ---
+server {
+    listen 80;
+    server_name bingisainath.com www.bingisainath.com portfolio.test;
+    server_tokens off;
+
+    root  /var/www/portfolio;
+    index index.html;
+
+    location / {
+        try_files $uri $uri/ /index.html;   # react-router paths such as /project/3
+    }
+    location /assets/ {                      # Vite hashes these filenames, so they can never go stale
+        # One header only: `expires` would emit a second, conflicting Cache-Control.
+        add_header Cache-Control "public, max-age=31536000, immutable";
+        try_files $uri =404;
+    }
+    location ~ /\. { deny all; }
+}

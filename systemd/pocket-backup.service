@@ -1,0 +1,16 @@
+[Unit]
+Description=Nightly backup of Pocket Drive to the phone
+Documentation=file:///home/sainath-bingi/github.com/home-server/docs/phase8-backup-hardening.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=sainath-bingi
+Group=sainath-bingi
+ExecStart=/home/sainath-bingi/github.com/home-server/scripts/backup.sh
+# Backups compete with the drive for disk and CPU; they are never the urgent job.
+Nice=10
+IOSchedulingClass=idle
+# A backup that hangs must not still be running when the next one starts.
+TimeoutStartSec=4h

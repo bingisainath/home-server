@@ -1,0 +1,37 @@
+[Unit]
+Description=Cloudflare Tunnel (home server)
+Documentation=https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/
+After=network-online.target nginx.service
+Wants=network-online.target
+
+[Service]
+Type=notify
+# cloudflared does send readiness, but a slow first connection must not trip a start timeout.
+TimeoutStartSec=0
+# Unprivileged: the tunnel only makes outbound connections and talks to nginx on loopback.
+User=cloudflared
+Group=cloudflared
+ExecStart=/usr/bin/cloudflared --config /etc/cloudflared/config.yml --no-autoupdate tunnel run
+Restart=always
+RestartSec=5
+# Survive a transient upstream outage without systemd giving up on the unit.
+StartLimitIntervalSec=0
+
+# Hardening: it needs nothing but the network and its own config.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+# AF_NETLINK included: cloudflared enumerates interfaces at startup and fails without it.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+ReadOnlyPaths=/etc/cloudflared
+
+[Install]
+WantedBy=multi-user.target

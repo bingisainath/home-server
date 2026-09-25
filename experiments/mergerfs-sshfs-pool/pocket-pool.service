@@ -1,0 +1,23 @@
+[Unit]
+Description=mergerfs pool for Pocket Drive (local SSD + Pixel 8)
+# BindsTo: if the phone mount goes away the pool stops, so the app sees I/O errors
+# rather than a listing with the phone's files silently missing (the scanner would drop them).
+BindsTo=pixel-sshfs.service
+After=pixel-sshfs.service
+
+[Service]
+Type=simple
+# Refuse to start unless the phone branch is a live sshfs mount. (No sentinel file: the app wipes .cloud-drive-tmp
+# on startup and the scanner indexes anything else at the pool root.)
+ExecStartPre=/bin/sh -c 'for i in $(seq 30); do [ "$(findmnt -n -o FSTYPE /srv/pocket/pixel)" = fuse.sshfs ] && timeout 5 ls /srv/pocket/pixel >/dev/null 2>&1 && exit 0; sleep 1; done; echo "phone branch not mounted" >&2; exit 1'
+ExecStart=/usr/bin/mergerfs -f \
+  -o allow_other,use_ino,fsname=pocketpool \
+  -o category.create=ff,minfreespace=50G,moveonenospc=true \
+  -o cache.files=off,dropcacheonclose=true \
+  /srv/pocket/local=RW:/srv/pocket/pixel=RW /srv/pocket/pool
+ExecStopPost=-/bin/umount -l /srv/pocket/pool
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

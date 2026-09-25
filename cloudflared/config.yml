@@ -1,0 +1,39 @@
+# Cloudflare named tunnel for the home server. Installed to /etc/cloudflared/config.yml.
+#
+# Difference from the phone's tunnel it replaces: the phone sent each hostname straight to a separate
+# local port (:3000 drive, :8000 portfolio). Here everything goes to nginx on :80 and nginx routes by
+# Host, so TLS termination, upload limits, caching and header trust all live in one place.
+#
+# <TUNNEL_ID> is filled in by scripts/install-cloudflared.sh.
+
+tunnel: <TUNNEL_ID>
+credentials-file: /etc/cloudflared/<TUNNEL_ID>.json
+
+# Leave the transport on auto: it prefers QUIC (UDP 7844) and falls back to http2 by itself.
+# The phone was pinned to http2 because its carrier blocked UDP 7844; a home connection usually doesn't.
+# If connections flap, pin it: protocol: http2
+no-autoupdate: true
+
+# Prometheus metrics + /ready, used by the health check and later by Uptime Kuma.
+metrics: 127.0.0.1:20241
+
+ingress:
+  # nginx decides which site answers, from the Host header cloudflared passes through unchanged.
+  - hostname: drive.bingisainath.com
+    service: http://127.0.0.1:80
+    originRequest:
+      # Large uploads and video streams must not be cut off mid-transfer.
+      connectTimeout: 30s
+      # No response timeout: an HLS transcode or a multi-GB download can take a long time.
+      disableChunkedEncoding: false
+      httpHostHeader: drive.bingisainath.com
+  - hostname: bingisainath.com
+    service: http://127.0.0.1:80
+    originRequest:
+      httpHostHeader: bingisainath.com
+  - hostname: www.bingisainath.com
+    service: http://127.0.0.1:80
+    originRequest:
+      httpHostHeader: www.bingisainath.com
+  # Anything else that reaches this tunnel is not ours.
+  - service: http_status:404

@@ -1,0 +1,93 @@
+# Monitoring, deliberately a SEPARATE compose project from the app stack.
+#
+# If these lived in compose.yaml, `stack.sh down` would stop alerting at exactly the moment you are
+# most likely to break something. Run with:  docker compose -f monitoring/compose.yaml up -d
+#
+# Nothing here is published to the internet. Ports bind to ${BIND_ADDR}, which is the machine's
+# Tailscale address, so the dashboards are reachable from your tailnet and nowhere else.
+
+x-logs: &logs
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  uptime-kuma:
+    image: louislam/uptime-kuma:1.23.16
+    container_name: uptime-kuma
+    restart: unless-stopped
+    volumes:
+      - uptime-kuma-data:/app/data
+    ports:
+      - "${BIND_ADDR:-127.0.0.1}:3001:3001"
+    logging: *logs
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: "1.0"
+
+  # Netdata needs container names to label its cgroup metrics. Handing it /var/run/docker.sock would
+  # give it the full Docker API — and `:ro` on a socket does NOT make the API read-only, it is still
+  # root-equivalent on this host. This proxy exposes only the container-listing endpoint instead.
+  docker-socket-proxy:
+    image: tecnativa/docker-socket-proxy:0.3.0
+    container_name: docker-socket-proxy
+    restart: unless-stopped
+    environment:
+      CONTAINERS: "1"     # everything else stays denied, including POST
+      POST: "0"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks: [monitoring]
+    logging: *logs
+    deploy:
+      resources:
+        limits:
+          memory: 64m
+
+  netdata:
+    image: netdata/netdata:v2.8.2
+    container_name: netdata
+    restart: unless-stopped
+    hostname: sainath-bingi-laptop
+    depends_on: [docker-socket-proxy]
+    environment:
+      DOCKER_HOST: docker-socket-proxy:2375
+      # No cloud account: metrics stay on this machine.
+      NETDATA_CLAIM_URL: ""
+    cap_add:
+      - SYS_PTRACE      # read other processes' details for per-process metrics
+      - SYS_ADMIN       # required by eBPF collectors
+    security_opt:
+      - apparmor:unconfined
+    volumes:
+      - netdata-config:/etc/netdata
+      - ./netdata/netdata.conf:/etc/netdata/netdata.conf:ro
+      - netdata-lib:/var/lib/netdata
+      - netdata-cache:/var/cache/netdata
+      # Read-only views of the host so metrics describe the machine, not the container.
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /etc/os-release:/host/etc/os-release:ro
+      - /var/log:/host/var/log:ro
+    ports:
+      - "${BIND_ADDR:-127.0.0.1}:19999:19999"
+    networks: [monitoring]
+    logging: *logs
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+          cpus: "2.0"
+
+volumes:
+  uptime-kuma-data:
+  netdata-config:
+  netdata-lib:
+  netdata-cache:
+
+networks:
+  monitoring:
+    driver: bridge

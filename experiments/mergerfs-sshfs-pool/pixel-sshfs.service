@@ -1,0 +1,24 @@
+[Unit]
+Description=SSHFS mount of phone storage (TEMPLATE: replace <USER>, <PHONE_TAILSCALE_IP>, <PORT>, <REMOTE_DIR>)
+Wants=network-online.target tailscaled.service
+After=network-online.target tailscaled.service
+
+[Service]
+Type=simple
+# Foreground sshfs; uid/gid mapping makes remote files appear owned by the local user.
+# No "reconnect": when the link dies sshfs must EXIT so systemd restarts it and pocket-pool (BindsTo) stops,
+# instead of the pool staying up with the phone branch silently missing. ServerAlive* detects a dead link in ~45s.
+ExecStart=/usr/bin/sshfs -f \
+  -o allow_other,default_permissions,idmap=user,uid=<UID>,gid=<GID> \
+  -o ServerAliveInterval=15,ServerAliveCountMax=3,ConnectTimeout=10 \
+  -o port=<PORT>,IdentityFile=/home/<USER>/.ssh/phone_sshfs,IdentitiesOnly=yes \
+  -o StrictHostKeyChecking=accept-new \
+  <REMOTE_USER>@<PHONE_TAILSCALE_IP>:<REMOTE_DIR> /srv/pocket/pixel
+# Kick the pool whenever this (re)starts, so it comes back after a phone reboot / link loss.
+ExecStartPost=-/bin/systemctl --no-block start pocket-pool.service
+ExecStopPost=-/bin/umount -l /srv/pocket/pixel
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

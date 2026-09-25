@@ -1,0 +1,96 @@
+# The home server as containers. One writer only: the app owns the SQLite database, so this stack
+# and the host systemd services (pocket-drive / nginx / cloudflared) must never run at the same time.
+# scripts/stack.sh enforces that; see docs/phase6-docker.md.
+
+x-logs: &logs
+  driver: json-file
+  options:
+    max-size: "10m"      # a runaway container cannot fill the disk
+    max-file: "3"
+
+services:
+  pocket-drive:
+    build:
+      context: ${APP_REPO:-../pocket-drive}
+      dockerfile: Dockerfile
+    image: pocket-drive:${IMAGE_TAG:-20.19.6-1}
+    restart: unless-stopped
+    # uid:gid 1000 matches the host-owned data directories; files keep their ownership.
+    user: "1000:1000"
+    environment:
+      DATA_DIR: /data
+      STORAGE_DIR: /files
+      HOST: 0.0.0.0
+      PORT: "3000"
+      # nginx is the only thing in front of the app, and it is inside this network.
+      TRUST_PROXY: "1"
+    env_file:
+      # Secrets (PASSWORD_HASH, GOOGLE_CLIENT_*, OWNER_EMAIL, PUBLIC_ORIGINS) stay out of the image
+      # and out of git. See docs/phase6-docker.md for how this file is produced.
+      - ${APP_ENV_FILE:-./secrets/pocket-drive.env}
+    volumes:
+      - ${STORAGE_DIR:-/srv/pocket/files}:/files
+      - ${DATA_DIR:-/home/sainath-bingi/cloud-storage}:/data
+    networks: [edge]
+    logging: *logs
+    deploy:
+      resources:
+        limits:
+          # ffmpeg transcodes are the memory/CPU spike; leave headroom for nginx and the OS.
+          memory: 3g
+          cpus: "3.0"
+
+  nginx:
+    # Same version as the host nginx (1.28.3), so host mode and container mode behave identically.
+    image: nginx:1.28.3-trixie
+    restart: unless-stopped
+    depends_on:
+      pocket-drive:
+        condition: service_healthy
+    environment:
+      DRIVE_UPSTREAM: pocket-drive:3000
+      # Must equal the edge network's subnet below, or cookies silently lose Secure.
+      DRIVE_TRUSTED_PROXY: 172.28.0.0/16
+      # Substitute ONLY ${DRIVE_*}, so nginx's own $host/$scheme/$remote_addr are left alone.
+      NGINX_ENVSUBST_FILTER: "DRIVE_"
+    volumes:
+      - ./nginx/pocket.conf.template:/etc/nginx/templates/pocket.conf.template:ro
+      - ${PORTFOLIO_DIST:-/var/www/portfolio}:/var/www/portfolio:ro
+    ports:
+      # Loopback only: the tunnel is the way in. Nothing is exposed to the LAN.
+      - "127.0.0.1:${NGINX_PORT:-80}:80"
+    networks: [edge]
+    logging: *logs
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+          cpus: "1.0"
+
+  cloudflared:
+    image: cloudflare/cloudflared:2026.9.3
+    restart: unless-stopped
+    # The image defaults to uid 65532, which cannot read a 0600 credentials file owned by 1000.
+    # Running as 1000 keeps the credential unreadable to everyone else on the host.
+    user: "1000:1000"
+    depends_on: [nginx]
+    command: tunnel --config /etc/cloudflared/config.yml --no-autoupdate run
+    volumes:
+      # Rendered with the real tunnel id by `scripts/stack.sh prepare`; the id is not in git.
+      - ${TUNNEL_CONFIG:-./secrets/cloudflared.yml}:/etc/cloudflared/config.yml:ro
+      - ${TUNNEL_CREDENTIALS:-./secrets/tunnel.json}:/etc/cloudflared/tunnel.json:ro
+    networks: [edge]
+    logging: *logs
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+          cpus: "1.0"
+
+networks:
+  edge:
+    driver: bridge
+    ipam:
+      config:
+        # Pinned so DRIVE_TRUSTED_PROXY above can name it; Docker's default pool would vary.
+        - subnet: 172.28.0.0/16
