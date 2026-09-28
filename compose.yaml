@@ -24,6 +24,10 @@ services:
       PORT: "3000"
       # nginx is the only thing in front of the app, and it is inside this network.
       TRUST_PROXY: "1"
+      # Push notifications. The app disables push cleanly when this file is absent, so the directory is
+      # mounted rather than the file: a bind mount of a missing file makes Docker create a directory
+      # in its place, and the container then fails instead of simply running without push.
+      FCM_SERVICE_ACCOUNT_FILE: /run/secrets/fcm/service-account.json
     env_file:
       # Secrets (PASSWORD_HASH, GOOGLE_CLIENT_*, OWNER_EMAIL, PUBLIC_ORIGINS) stay out of the image
       # and out of git. See docs/phase6-docker.md for how this file is produced.
@@ -31,6 +35,7 @@ services:
     volumes:
       - ${STORAGE_DIR:-/srv/pocket/files}:/files
       - ${DATA_DIR:-/home/sainath-bingi/cloud-storage}:/data
+      - ./secrets/fcm:/run/secrets/fcm:ro
     networks: [edge]
     logging: *logs
     deploy:
