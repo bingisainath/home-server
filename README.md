@@ -34,6 +34,7 @@ live in a git-ignored `.env`.
 | 5 | Decommission the phone's live app (keep it as backup target) | **done** — services retired across reboots, phone kept reachable |
 | 6 | docker-compose stack | **done** — stack live, 15/15 checks, host services stood down |
 | 7 | Uptime Kuma + Netdata | **done** — tailnet-only, Telegram alerts, backup push monitor wired |
+| 9 | Continuous deployment (pull-based, CI-gated) | **done** — deploy verified end to end; rollback path unproven |
 | 8 | Backup job, no-suspend, unattended-upgrades, log/resource limits | **done** — nightly backup verified restorable; timer + logind drop-in need installing |
 
 ## Layout
@@ -46,6 +47,7 @@ live in a git-ignored `.env`.
   range request, delete, logout). Refuses to run if the throwaway instance resolves storage outside its temp dir.
 - `cloudflared/`: tunnel config and a hardened systemd unit (runs as its own unprivileged account)
 - `compose.yaml` + `scripts/stack.sh`: the containerised stack and its prepare/test/up/down driver
+- `scripts/deploy.sh` + `docs/phase9-cd.md`: pull-based CD — CI-gated, health-checked, self-rolling-back
 - `scripts/backup.sh` + `scripts/verify-backup.sh`: nightly backup to the phone, and proof it restores
 - `systemd/pocket-backup.{service,timer}`, `systemd/logind-no-suspend.conf`: schedule and no-sleep
 - `docs/phase8-backup-hardening.md`: what makes it a backup rather than a copy, and how to restore

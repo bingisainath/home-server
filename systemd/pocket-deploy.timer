@@ -1,0 +1,12 @@
+[Unit]
+Description=Check for new Pocket Drive commits periodically
+
+[Timer]
+# Five minutes is responsive enough for a one-person project and cheap: when nothing has changed the
+# run is a single `git fetch` and exits.
+OnBootSec=5m
+OnUnitActiveSec=5m
+RandomizedDelaySec=30s
+
+[Install]
+WantedBy=timers.target

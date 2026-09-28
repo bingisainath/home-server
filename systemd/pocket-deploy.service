@@ -1,0 +1,15 @@
+[Unit]
+Description=Deploy Pocket Drive if origin/main moved and its CI passed
+Documentation=file:///home/sainath-bingi/github.com/home-server/docs/phase9-cd.md
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=sainath-bingi
+Group=sainath-bingi
+SupplementaryGroups=docker
+ExecStart=/home/sainath-bingi/github.com/home-server/scripts/deploy.sh
+# A build plus a health check, generously: anything longer has gone wrong.
+TimeoutStartSec=30m
+Nice=10
